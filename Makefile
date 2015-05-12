@@ -1,3 +1,5 @@
+
+INCLUDE = eigen/ -Ihelpers.h
 BASE = shapeedit
 
 all: $(BASE)
@@ -28,7 +30,7 @@ CXX = g++
 OBJ = $(BASE).o ppm.o glsupport.o poisson.o
 
 $(BASE): $(OBJ)
-	$(LINK.cpp) -o $@ $^ $(LIBS)
+	$(LINK.cpp) -I$(INCLUDE) -o $@ $^ $(LIBS)
 
 clean:
 	rm -f $(OBJ) $(BASE)
