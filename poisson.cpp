@@ -20,7 +20,16 @@ int g_iterationsPerSecond = 8;
  * GLOBAL VARIABLES
  */
 
-MatrixXd weightMatrix;
+Mesh g_mesh;
+
+MatrixXd g_weightMatrix;
+vector<vector<double> > g_weightVector;
+
+vector<vector<Cvec2> > g_initialPositions;
+vector<vector<Cvec2> > g_targetPositions;
+vector<Matrix2d> g_rotations;
+
+int iterations = 0;
 
 
 /*
@@ -74,6 +83,29 @@ MatrixXd getWeights(Mesh& m) {
 }
 
 
+// gets a vector of positions from a mesh
+vector<vector<Cvec2> > getPositionsFromMesh(Mesh& m) {
+
+  int n = m.getNumVertices();
+  vector<vector<Cvec2> > positions(n);
+
+  int e = m.getNumEdges();
+
+  for (int idx = 0; idx < e; idx++) {
+    const Mesh::Edge ed = m.getEdge(idx);
+
+    Mesh::Vertex vi = ed.getVertex(0), vj = ed.getVertex(1);
+    int i = vi.getIndex(), j = vj.getIndex();
+    double wij = -g_weightMatrix(i,j);
+
+    positions.at(i).push_back(vi.getPosition()-vj.getPosition());
+    positions.at(j).push_back(vj.getPosition()-vi.getPosition());
+  }
+
+  return positions;
+}
+
+
 
 
 
@@ -83,16 +115,42 @@ MatrixXd getWeights(Mesh& m) {
 //
 void initPoisson(Mesh& m) {
 
-  weightMatrix = getWeights(m);
+  g_weightMatrix = getWeights(m);
+  int e = m.getNumEdges();
+  int n = m.getNumVertices();
+
+  vector<vector<double> > weightVector(n);
+  
+  for (int idx = 0; idx < e; idx++) {
+    const Mesh::Edge ed = m.getEdge(idx);
+
+    Mesh::Vertex vi = ed.getVertex(0), vj = ed.getVertex(1);
+    int i = vi.getIndex(), j = vj.getIndex();
+    double wij = -g_weightMatrix(i,j);
+
+    weightVector.at(i).push_back(wij);
+    weightVector.at(j).push_back(wij);
+  }
+
+  g_weightVector = weightVector;
+
+  g_initialPositions = getPositionsFromMesh(m);
+
+  g_mesh = m;
 
 }
+
 
 // This function is called immediately after each movement
 // with an updated set of handles and the most recent mesh.
 //
 void afterMove(Mesh& m, vector<handleType>& handles) {
-// TODO
-//
+
+
+  g_targetPositions = getPositionsFromMesh(m);
+
+  iterations = 0;
+
 }
 
 
@@ -102,59 +160,46 @@ void afterMove(Mesh& m, vector<handleType>& handles) {
 
 
 // calculates the rotation matrices
-vector<Matrix2d> getRs(Mesh& m) {
+void getRs() {
 
-  int n = m.getNumVertices();
+  int n = g_initialPositions.size();
   vector<Matrix2d> rs(n);
 
-  int e = m.getNumEdges();
-  vector<vector<Cvec2> > positions(n);
-  vector<vector<double> > weights(n);
-
-  for (int idx = 0; idx < e; idx++) {
-    const Mesh::Edge ed = m.getEdge(idx);
-
-    Mesh::Vertex vi = ed.getVertex(0), vj = ed.getVertex(1);
-    int i = vi.getIndex(), j = vj.getIndex();
-    double wij = -weightMatrix(i,j);
-
-    positions.at(i).push_back(vj.getPosition());
-    positions.at(j).push_back(vi.getPosition());
-    weights.at(i).push_back(wij);
-    weights.at(j).push_back(wij);
-  }
-
   for (int idx = 0; idx < n; idx++) {
-    vector<Cvec2> vecP = positions.at(idx);
-    vector<double> vecW = weights.at(idx);
+    vector<Cvec2> vecP = g_initialPositions.at(idx);
+    vector<Cvec2> vecP2 = g_targetPositions.at(idx);
+    vector<double> vecW = g_weightVector.at(idx);
     int nbs = vecP.size();
     assert(nbs == vecW.size());
+    assert(nbs == vecP2.size());
 
     MatrixXd matP(2,nbs);
+    MatrixXd matP2(2,nbs);
     MatrixXd matW = MatrixXd::Zero(nbs,nbs);
 
     for (int j = 0; j < nbs; j++) {
       matP.col(j) << vecP.at(j)[0], vecP.at(j)[1];
+      matP2.col(j) << vecP2.at(j)[0], vecP2.at(j)[1];
       matW(j,j) = vecW.at(j);
     }
 
-
-    MatrixXd matS = matP * matW * matP.transpose();
+    MatrixXd matS = matP * matW * matP2.transpose();
 
     JacobiSVD<MatrixXd> svd(matS, ComputeThinU | ComputeThinV);
 
     Matrix2d matR = svd.matrixV() * svd.matrixU().transpose();
     rs.at(idx) = matR;
+
   }
 
-  return rs;
+  g_rotations = rs;
 }
 
 
 // calculates the matrix B for the system
-MatrixXd getMatrixB(Mesh& m, MatrixXd& weights) {
+MatrixXd getMatrixB(MatrixXd& weights, vector<Matrix2d> rs) {
 
-  vector<Matrix2d> rs = getRs(m);
+  Mesh m = g_mesh;
 
   int n = m.getNumVertices();
   MatrixXd matB = MatrixXd::Zero(n,2);
@@ -290,9 +335,16 @@ VectorXd solveSystem(MatrixXd matA, MatrixXd matB) {
 //
 bool doIteration(Mesh& m, vector<handleType>& handles) {
 
-  MatrixXd matB = getMatrixB(m, weightMatrix);
+  // get rotation matrices
+  getRs();
 
-  pair<MatrixXd,MatrixXd> system = getSystem(weightMatrix, matB, handles);
+  // get B matrix of the system
+  MatrixXd matB = getMatrixB(g_weightMatrix, g_rotations);
+
+  // remove rows to adapt to handles
+  pair<MatrixXd,MatrixXd> system = getSystem(g_weightMatrix, matB, handles);
+
+  // solve system
   VectorXd x = solveSystem(system.first,system.second);
 
   int n = m.getNumVertices();
@@ -311,7 +363,7 @@ bool doIteration(Mesh& m, vector<handleType>& handles) {
     }
   }
 
-  return true;
+
 
   // update vertex positions
   double error = 0;
@@ -319,10 +371,14 @@ bool doIteration(Mesh& m, vector<handleType>& handles) {
     error += norm2(m.getVertex(i).getPosition() - positions.at(i));
     m.getVertex(i).setPosition(positions.at(i));
   }
-  error /= n;
 
+
+  g_targetPositions = getPositionsFromMesh(m);
+  error /= n; 
+
+  // return true;
   cout << "error " << error << endl;
 
-  return error < 10-2;
+  return (error < 10e-4);
 }
 
