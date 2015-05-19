@@ -27,7 +27,7 @@ vector<vector<double> > g_weightVector;
 
 vector<vector<Cvec2> > g_initialPositions;
 vector<vector<Cvec2> > g_targetPositions;
-vector<Matrix2d> g_rotations;
+vector<MatrixXd> g_rotations;
 
 int iterations = 0;
 
@@ -163,7 +163,7 @@ void afterMove(Mesh& m, vector<handleType>& handles) {
 void getRs() {
 
   int n = g_initialPositions.size();
-  vector<Matrix2d> rs(n);
+  vector<MatrixXd> rs(n);
 
   for (int idx = 0; idx < n; idx++) {
     vector<Cvec2> vecP = g_initialPositions.at(idx);
@@ -187,7 +187,7 @@ void getRs() {
 
     JacobiSVD<MatrixXd> svd(matS, ComputeThinU | ComputeThinV);
 
-    Matrix2d matR = svd.matrixV() * svd.matrixU().transpose();
+    MatrixXd matR = svd.matrixV() * svd.matrixU().transpose();
     rs.at(idx) = matR;
 
   }
@@ -197,7 +197,7 @@ void getRs() {
 
 
 // calculates the matrix B for the system
-MatrixXd getMatrixB(MatrixXd& weights, vector<Matrix2d> rs) {
+MatrixXd getMatrixB(MatrixXd& weights, vector<MatrixXd> rs) {
 
   Mesh m = g_mesh;
 
